@@ -1,20 +1,32 @@
 # app/routers/predict.py
 from fastapi import APIRouter, HTTPException, Query
-from app.utils.models import PredictRequest, resposta
+from app.utils.models import resposta
 from app.utils.enums import Move, Winner
-from app.mediapipe.gestos import reconhecimento_gestos
 from typing import Optional
 import random
+
+# Importe a função capture_and_recognize
+from app.mediapipe.gestos import capture_and_recognize
 
 router = APIRouter()
 
 @router.post("/predicao", response_model=resposta)
-def predicao(request: PredictRequest, cheat_mode: Optional[bool] = Query(False)):
-    # Decodifica a imagem e reconhece o gesto
+def predicao(cheat_mode: Optional[bool] = Query(False)):
+    # Captura a imagem e reconhece o gesto
     try:
-        player_move = reconhecimento_gestos(request.image)
+        image_base64, gesture = capture_and_recognize()
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
+
+    # Mapeia o gesto para um movimento do jogo
+    if gesture == "✊ (Punho fechado)":
+        player_move = Move.pedra
+    elif gesture == "👋 (Mão aberta)":
+        player_move = Move.papel
+    elif gesture == "✌️ (Sinal de Paz)":
+        player_move = Move.tesoura
+    else:
+        raise HTTPException(status_code=400, detail="Gesto não reconhecido ou não suportado.")
 
     # Determina o movimento do computador
     if cheat_mode:
@@ -39,9 +51,10 @@ def predicao(request: PredictRequest, cheat_mode: Optional[bool] = Query(False))
     else:
         winner = Winner.computer
 
-    # Retorna a previsão
+    # Retorna a resposta
     return resposta(
         player_move=player_move,
         computer_move=computer_move,
-        winner=winner
+        winner=winner,
+        image=image_base64  # Inclui a imagem capturada na resposta
     )
