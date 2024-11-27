@@ -19,7 +19,7 @@ export const StatusPanel = ({ gameState, result }: StatusPanelProps) => {
             <div>
               <p className="text-lg mb-2">Você</p>
               <div className="text-4xl">
-                {result.player === 'pedra' && '🪨'}
+                {result.player === 'pedra' && '✊'}
                 {result.player === 'papel' && '📄'}
                 {result.player === 'tesoura' && '✂️'}
               </div>
@@ -30,7 +30,7 @@ export const StatusPanel = ({ gameState, result }: StatusPanelProps) => {
             <div>
               <p className="text-lg mb-2">Computador</p>
               <div className="text-4xl">
-                {result.computer === 'pedra' && '🪨'}
+                {result.computer === 'pedra' && '✊'}
                 {result.computer === 'papel' && '📄'}
                 {result.computer === 'tesoura' && '✂️'}
               </div>

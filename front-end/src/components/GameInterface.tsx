@@ -1,12 +1,10 @@
-// components/GameInterface.tsx
 'use client';
 
 import { useState, useEffect, useRef } from 'react';
-import { Camera, RotateCcw } from 'lucide-react';
-import { CameraService } from '../services/cameraService';
+import { Camera, RotateCcw, X } from 'lucide-react';
+import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import ScoreBoard from './ScoreBoard';
 import StatusPanel from './StatusPanel';
-import VideoComponent from './VideoComponent';
 import { GameConfig, GameResult, GameScore, GameState, Winner } from '@/types/game';
 
 interface GameInterfaceProps {
@@ -15,8 +13,8 @@ interface GameInterfaceProps {
 }
 
 const GameInterface = ({ config, onReturnToMenu }: GameInterfaceProps) => {
-  const videoRef = useRef<HTMLVideoElement>(null);
-  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const videoRef = useRef<HTMLVideoElement | null>(null);
+  const canvasRef = useRef<HTMLCanvasElement | null>(null);
 
   const [gameState, setGameState] = useState<GameState>('waiting');
   const [countdown, setCountdown] = useState(3);
@@ -30,6 +28,7 @@ const GameInterface = ({ config, onReturnToMenu }: GameInterfaceProps) => {
     computer: 0,
   });
   const [isProcessing, setIsProcessing] = useState(false);
+  const [showError, setShowError] = useState(false);
 
   const maxScore = config?.maxRounds === 3 ? 2 : 3;
   const isGameOver = score.player === maxScore || score.computer === maxScore;
@@ -43,18 +42,52 @@ const GameInterface = ({ config, onReturnToMenu }: GameInterfaceProps) => {
     }
   };
 
+  const startCamera = async () => {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: {
+          facingMode: 'user',
+          width: { ideal: 640 },
+          height: { ideal: 480 }
+        }
+      });
+
+      if (videoRef.current) {
+        videoRef.current.srcObject = stream;
+        await videoRef.current.play();
+        return true;
+      }
+      return false;
+    } catch (error) {
+      console.error('Erro ao iniciar câmera:', error);
+      return false;
+    }
+  };
+
   const startGame = async () => {
     try {
-      await CameraService.startCamera(videoRef);
+      const cameraStarted = await startCamera();
+      if (!cameraStarted) {
+        throw new Error('Não foi possível iniciar a câmera');
+      }
       setGameState('playing');
       setCountdown(3);
     } catch (error) {
-      alert((error as Error).message);
+      alert('Erro ao acessar a câmera. Verifique suas permissões.');
+    }
+  };
+
+  const stopCamera = () => {
+    if (videoRef.current && videoRef.current.srcObject) {
+      const stream = videoRef.current.srcObject as MediaStream;
+      stream.getTracks().forEach(track => track.stop());
+      videoRef.current.srcObject = null;
     }
   };
 
   const handlePlayAgain = () => {
     if (isGameOver) {
+      stopCamera();
       onReturnToMenu();
     } else {
       setGameState('waiting');
@@ -68,32 +101,55 @@ const GameInterface = ({ config, onReturnToMenu }: GameInterfaceProps) => {
   };
 
   const captureAndProcessFrame = async () => {
+    if (!videoRef.current || !canvasRef.current) return;
+
     setIsProcessing(true);
     try {
-      // Captura o frame atual
-      const frameData = CameraService.captureFrame(videoRef, canvasRef);
-      if (!frameData) {
-        throw new Error('Não foi possível capturar a imagem');
+      // Captura o frame
+      const canvas = canvasRef.current;
+      const video = videoRef.current;
+      
+      canvas.width = video.videoWidth;
+      canvas.height = video.videoHeight;
+      
+      const context = canvas.getContext('2d');
+      if (!context) throw new Error('Não foi possível obter o contexto do canvas');
+      
+      // Desenha o frame atual no canvas
+      context.drawImage(video, 0, 0, canvas.width, canvas.height);
+      
+      // Converte para base64
+      const frameData = canvas.toDataURL('image/jpeg', 0.8).split(',')[1];
+
+      // Envia para API
+      const response = await fetch(`http://localhost:8000/predicao?cheat_mode=${config?.cheatMode ? 'true' : 'false'}`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          image_base64: frameData,
+        }),
+      });
+
+      if (!response.ok) {
+        throw new Error('Não foi possível reconhecer seu gesto');
       }
 
-      // Envia para a API e aguarda o resultado
-      const prediction = await CameraService.sendFrameToAPI(frameData);
+      const prediction = await response.json();
 
-      // Atualiza o estado com o resultado
       setResult({
         player: prediction.player_move,
         computer: prediction.computer_move,
         winner: prediction.winner,
       });
 
-      // Atualiza o placar
       updateScore(prediction.winner);
-
-      // Muda o estado do jogo para mostrar o resultado
       setGameState('result');
     } catch (error) {
       console.error('Erro ao processar jogada:', error);
-      alert('Erro ao processar sua jogada. Tente novamente.');
+      setShowError(true);
+      setTimeout(() => setShowError(false), 5000);
       setGameState('waiting');
     } finally {
       setIsProcessing(false);
@@ -116,13 +172,12 @@ const GameInterface = ({ config, onReturnToMenu }: GameInterfaceProps) => {
 
   useEffect(() => {
     return () => {
-      CameraService.stopCamera(videoRef);
+      stopCamera();
     };
   }, []);
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-purple-900 via-blue-900 to-indigo-900 p-8">
-      {/* Botão Voltar */}
       <button
         onClick={onReturnToMenu}
         className="absolute top-4 left-4 bg-white/10 hover:bg-white/20 text-white px-4 py-2 rounded-lg"
@@ -130,7 +185,6 @@ const GameInterface = ({ config, onReturnToMenu }: GameInterfaceProps) => {
         Voltar ao Menu
       </button>
 
-      {/* Indicador de Modo Roubo */}
       {config?.cheatMode && (
         <div className="absolute top-4 right-4 bg-red-500 text-white px-4 py-2 rounded-full">
           Modo Roubo Ativo
@@ -138,33 +192,32 @@ const GameInterface = ({ config, onReturnToMenu }: GameInterfaceProps) => {
       )}
 
       <div className="max-w-4xl mx-auto">
-        {/* Cabeçalho */}
         <div className="text-center mb-8">
           <h1 className="text-4xl font-bold text-white mb-4">Pedra, Papel e Tesoura</h1>
           <p className="text-gray-300">Jogue usando sua câmera!</p>
         </div>
 
-        {/* Placar */}
         <ScoreBoard score={score} />
 
-        {/* Área do Jogo */}
         <div className="grid md:grid-cols-2 gap-8">
-          {/* Câmera */}
           <div className="bg-gray-900 bg-opacity-80 p-4 rounded-lg text-white">
             <div className="aspect-video bg-black rounded-lg flex items-center justify-center mb-4 relative">
-              {gameState === 'waiting' ? (
+              <video
+                ref={videoRef}
+                autoPlay
+                playsInline
+                muted
+                className={`absolute inset-0 w-full h-full object-cover ${gameState === 'waiting' ? 'hidden' : ''}`}
+              />
+              {gameState === 'waiting' && (
                 <Camera className="w-16 h-16 text-gray-600" />
-              ) : (
-                <>
-                  <VideoComponent />
-                  {(gameState === 'playing' || isProcessing) && (
-                    <div className="absolute inset-0 flex items-center justify-center">
-                      <div className="text-6xl font-bold text-white bg-black/50 rounded-full w-20 h-20 flex items-center justify-center">
-                        {countdown > 0 ? countdown : '📸'}
-                      </div>
-                    </div>
-                  )}
-                </>
+              )}
+              {(gameState === 'playing' || isProcessing) && (
+                <div className="absolute inset-0 flex items-center justify-center">
+                  <div className="text-6xl font-bold text-white bg-black/50 rounded-full w-20 h-20 flex items-center justify-center">
+                    {countdown > 0 ? countdown : '📸'}
+                  </div>
+                </div>
               )}
             </div>
             <canvas ref={canvasRef} className="hidden" />
@@ -196,12 +249,10 @@ const GameInterface = ({ config, onReturnToMenu }: GameInterfaceProps) => {
             </div>
           </div>
 
-          {/* Status */}
           <StatusPanel gameState={gameState} result={result} />
         </div>
       </div>
 
-      {/* Modal de Fim de Jogo */}
       {isGameOver && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center">
           <div className="bg-white p-8 rounded-lg text-center">
@@ -218,6 +269,20 @@ const GameInterface = ({ config, onReturnToMenu }: GameInterfaceProps) => {
               Voltar ao Menu
             </button>
           </div>
+        </div>
+      )}
+
+      {showError && (
+        <div className="fixed bottom-4 right-4 z-50">
+          <Alert variant="destructive" className="animate-in slide-in-from-right">
+            <AlertTitle className="flex items-center gap-2">
+              <X className="h-4 w-4" />
+              Ops! Não entendi seu gesto
+            </AlertTitle>
+            <AlertDescription>
+              Por favor, tente novamente fazendo um dos gestos: ✊ (Pedra), ✋ (Papel) ou ✌️ (Tesoura)
+            </AlertDescription>
+          </Alert>
         </div>
       )}
     </div>

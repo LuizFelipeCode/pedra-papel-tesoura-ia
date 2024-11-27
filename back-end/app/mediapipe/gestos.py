@@ -110,3 +110,32 @@ if __name__ == "__main__":
     image_base64, gesture = capture_and_recognize()
     print("Gesto reconhecido:", gesture)
     # Aqui você pode usar image_base64 conforme necessário
+
+def process_image(image_base64):
+    try:
+        # Decodifica a imagem Base64
+        image_data = base64.b64decode(image_base64)
+        np_array = np.frombuffer(image_data, np.uint8)
+        frame = cv2.imdecode(np_array, cv2.IMREAD_COLOR)
+
+        # Converte a imagem para RGB
+        image_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+
+        # Processa a imagem com MediaPipe
+        with mp_hands.Hands(
+            static_image_mode=True,
+            max_num_hands=1,
+            model_complexity=1,
+            min_detection_confidence=0.5) as hands:
+
+            results = hands.process(image_rgb)
+            if results.multi_hand_landmarks:
+                for hand_landmarks in results.multi_hand_landmarks:
+                    gesture = recognize_gesture(hand_landmarks)
+                    return gesture
+            else:
+                return "Nenhuma mão detectada."
+    except Exception as e:
+        # Salva uma mensagem de erro no log caso algo dê errado
+        print(f"Erro ao processar a imagem: {e}")
+        return "Erro ao processar a imagem."

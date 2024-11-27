@@ -9,3 +9,6 @@ class resposta(BaseModel):
     player_move: Optional[Move]
     computer_move: Optional[Move]
     winner: Optional[Winner]
+
+class ImageRequest(BaseModel):
+    image_base64: str
